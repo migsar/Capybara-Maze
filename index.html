@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CapyMaze Quest</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Custom retro font feel */
+      @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+      body {
+        font-family: 'VT323', monospace;
+        background-color: #1a1a1a;
+        color: #efefef;
+        overscroll-behavior: none;
+      }
+      .pixel-font {
+        font-family: 'VT323', monospace;
+      }
+      /* Canvas container styling */
+      #game-canvas-container canvas {
+        box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        border: 4px solid #44403c;
+        border-radius: 8px;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.32.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "pixi.js": "https://aistudiocdn.com/pixi.js@^8.1.0/dist/pixi.min.mjs"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
