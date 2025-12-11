@@ -1,11 +1,6 @@
 import { BOARD_WIDTH, BOARD_HEIGHT } from "../constants";
 import { EntityType, Position } from "../types";
 
-// Helper to check bounds
-const isValid = (x: number, y: number) => {
-  return x > 0 && x < BOARD_WIDTH - 1 && y > 0 && y < BOARD_HEIGHT - 1;
-};
-
 export const generateMaze = (levelIndex: number): { 
   grid: number[][], 
   playerStart: Position, 
@@ -23,7 +18,6 @@ export const generateMaze = (levelIndex: number): {
   );
 
   // 2. Recursive Backtracker for Maze Generation
-  // Start at 1,1
   const start: Position = { x: 1, y: 1 };
   grid[start.y][start.x] = EntityType.EMPTY;
   
@@ -39,7 +33,6 @@ export const generateMaze = (levelIndex: number): {
     const current = stack[stack.length - 1];
     const neighbors: { p: Position, d: Position }[] = [];
 
-    // Check all 4 directions
     for (const d of directions) {
       const nx = current.x + d.x;
       const ny = current.y + d.y;
@@ -52,62 +45,77 @@ export const generateMaze = (levelIndex: number): {
     }
 
     if (neighbors.length > 0) {
-      // Choose random neighbor
       const chosen = neighbors[Math.floor(Math.random() * neighbors.length)];
-      
-      // Remove wall between
       grid[current.y + chosen.d.y][current.x + chosen.d.x] = EntityType.EMPTY;
       grid[chosen.p.y][chosen.p.x] = EntityType.EMPTY;
-      
       stack.push(chosen.p);
     } else {
       stack.pop();
     }
   }
 
-  // 3. Post-processing: Make it "loopier" (less dead ends) by removing some random walls
-  const loopsToRemove = Math.floor((width * height) * 0.05); // 5% of tiles
+  // 3. Post-processing: Remove some walls for loops
+  const loopsToRemove = Math.floor((width * height) * 0.08); 
   for (let i = 0; i < loopsToRemove; i++) {
     const rx = Math.floor(Math.random() * (width - 2)) + 1;
     const ry = Math.floor(Math.random() * (height - 2)) + 1;
     if (grid[ry][rx] === EntityType.WALL) {
-       // Only remove if it connects two empty spaces
-       // (Simple heuristic: just remove random inner walls)
        grid[ry][rx] = EntityType.EMPTY;
     }
   }
 
-  // 4. Place Entities
-  
-  // Pond (Goal) - Try to place it far from start (bottom right area)
-  let pond: Position = { x: width - 2, y: height - 2 };
-  // Ensure pond is on an empty spot (it should be due to maze alg, but safe check)
-  while(grid[pond.y][pond.x] === EntityType.WALL) {
-    pond.x--;
-    if(pond.x <= 1) { pond.x = width-2; pond.y--; }
-  }
-  grid[pond.y][pond.x] = EntityType.POND;
+  // 4. Create Pond Area (4x4 block in bottom right)
+  const pondWidth = 4;
+  const pondHeight = 4;
+  const pondStartX = width - pondWidth - 1;
+  const pondStartY = height - pondHeight - 1;
 
-  // Collect empty spots for placement
+  // Carve out the pond
+  for (let y = pondStartY; y < pondStartY + pondHeight; y++) {
+    for (let x = pondStartX; x < pondStartX + pondWidth; x++) {
+      grid[y][x] = EntityType.POND;
+    }
+  }
+
+  // Ensure connectivity to the pond
+  // We carve a path from a known empty spot outside the pond into the pond
+  const connectX = pondStartX - 1;
+  const connectY = pondStartY + Math.floor(pondHeight / 2);
+  grid[connectY][connectX] = EntityType.EMPTY;
+  // Make sure the spot next to it is also empty so we don't have a wall blocking the entrance
+  if (grid[connectY][connectX - 1] === EntityType.WALL) {
+      grid[connectY][connectX - 1] = EntityType.EMPTY;
+  }
+
+  // Define the "Goal" position as the center of the pond
+  const pond: Position = { 
+    x: pondStartX + Math.floor(pondWidth/2), 
+    y: pondStartY + Math.floor(pondHeight/2) 
+  };
+
+  // 5. Place Entities (excluding pond area)
   const emptySpots: Position[] = [];
   for(let y=1; y<height-1; y++) {
     for(let x=1; x<width-1; x++) {
-      if(grid[y][x] === EntityType.EMPTY && (x !== start.x || y !== start.y) && (x !== pond.x || y !== pond.y)) {
+      // Check if inside pond area
+      const inPond = x >= pondStartX && x < pondStartX + pondWidth && 
+                     y >= pondStartY && y < pondStartY + pondHeight;
+      
+      if(grid[y][x] === EntityType.EMPTY && !inPond && (x !== start.x || y !== start.y)) {
         emptySpots.push({x, y});
       }
     }
   }
 
-  // Shuffle empty spots
+  // Shuffle spots
   for (let i = emptySpots.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [emptySpots[i], emptySpots[j]] = [emptySpots[j], emptySpots[i]];
   }
 
-  // Gates - block paths
-  // We need to place gates on "chokepoints" ideally, but random placement on paths works for now.
+  // Gates
   const gates: Position[] = [];
-  const numGates = 2 + Math.floor(levelIndex / 2); // More gates as levels go up
+  const numGates = 2 + Math.floor(levelIndex / 2);
   for(let i=0; i<numGates && emptySpots.length > 0; i++) {
      const pos = emptySpots.pop()!;
      grid[pos.y][pos.x] = EntityType.GATE;
@@ -116,16 +124,15 @@ export const generateMaze = (levelIndex: number): {
 
   // Predators
   const predators: Position[] = [];
-  const numPredators = 2 + Math.floor(levelIndex / 3);
+  const numPredators = 3 + Math.floor(levelIndex / 3);
   for(let i=0; i<numPredators && emptySpots.length > 0; i++) {
     const pos = emptySpots.pop()!;
     predators.push(pos);
-    // Note: We don't mark grid as predator, because they move. Grid stays EMPTY.
   }
 
   // Treats
   const treats: Position[] = [];
-  const numTreats = 3;
+  const numTreats = 4;
   for(let i=0; i<numTreats && emptySpots.length > 0; i++) {
     const pos = emptySpots.pop()!;
     grid[pos.y][pos.x] = EntityType.TREAT;

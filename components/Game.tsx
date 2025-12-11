@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { GameState, GameSettings, Position, TriviaQuestion, EntityType } from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import { GameState, GameSettings, Position, TriviaQuestion } from '../types';
 import { TRANSLATIONS } from '../constants';
 import { generateTriviaQuestion } from '../services/geminiService';
 import { GameEngine } from '../classes/GameEngine';
@@ -17,7 +17,7 @@ const Game: React.FC<Props> = ({ settings, onGameOver }) => {
   // Game UI State
   const [level, setLevel] = useState(1);
   const [score, setScore] = useState(0);
-  const [lives, setLives] = useState(3);
+  const [lives, setLives] = useState(4);
   const [gameState, setGameState] = useState<GameState>(GameState.PLAYING);
   
   // Trivia State
@@ -26,11 +26,9 @@ const Game: React.FC<Props> = ({ settings, onGameOver }) => {
   const [loadingTrivia, setLoadingTrivia] = useState(false);
   const [triviaFeedback, setTriviaFeedback] = useState<'correct' | 'wrong' | null>(null);
 
-  // --- Engine Initialization ---
   useEffect(() => {
     if (!canvasContainerRef.current) return;
 
-    // Callback to bridge Engine Events -> React State
     const handleEngineEvent = (event: string, data: any) => {
       switch(event) {
         case 'GATE_HIT':
@@ -44,7 +42,7 @@ const Game: React.FC<Props> = ({ settings, onGameOver }) => {
              const newLives = prev - 1;
              if (newLives <= 0) {
                setGameState(GameState.GAME_OVER);
-               onGameOver(score); // Pass current score (state capture issue avoided by refs inside engine usually, but here we use simple logic)
+               onGameOver(score);
              }
              return newLives;
           });
@@ -67,9 +65,8 @@ const Game: React.FC<Props> = ({ settings, onGameOver }) => {
       engineRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount
+  }, []);
 
-  // --- Level Change Effect ---
   useEffect(() => {
     if (engineRef.current && level > 1) {
       engineRef.current.loadLevel(level);
@@ -77,21 +74,17 @@ const Game: React.FC<Props> = ({ settings, onGameOver }) => {
     }
   }, [level]);
 
-  // --- Game Over Effect ---
   useEffect(() => {
     if (lives <= 0) {
       onGameOver(score);
     }
   }, [lives, onGameOver, score]);
 
-
-  // --- Trivia Logic ---
   const handleGateEncounter = async (pos: Position) => {
     setGameState(GameState.TRIVIA);
     setGatePosForTrivia(pos);
     setLoadingTrivia(true);
     
-    // Pause Engine is handled inside engine when emitting event
     const question = await generateTriviaQuestion(settings.topic, settings.language);
     setCurrentTrivia(question);
     setLoadingTrivia(false);
@@ -103,7 +96,7 @@ const Game: React.FC<Props> = ({ settings, onGameOver }) => {
     if (index === currentTrivia.correctIndex) {
       setTriviaFeedback('correct');
       setTimeout(() => {
-        engineRef.current?.unlockGate(gatePosForTrivia); // Unlocks and Resumes
+        engineRef.current?.unlockGate(gatePosForTrivia);
         setScore(prev => prev + 500);
         setTriviaFeedback(null);
         setCurrentTrivia(null);
@@ -118,27 +111,30 @@ const Game: React.FC<Props> = ({ settings, onGameOver }) => {
         setCurrentTrivia(null);
         setGatePosForTrivia(null);
         setGameState(GameState.PLAYING);
-        engineRef.current?.resume(); // Resume without unlocking
+        engineRef.current?.resume();
       }, 1000);
     }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-stone-950 text-white p-2">
-      {/* UI Overlay */}
-      <div className="w-full max-w-2xl flex justify-between items-center mb-4 bg-stone-900 p-4 border-2 border-green-700 rounded-lg shadow-lg">
-         <div className="flex flex-col">
-           <span className="text-green-500 text-xs">{t.score}</span>
-           <span className="text-2xl font-bold">{score.toString().padStart(6, '0')}</span>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-stone-950 text-white font-[VT323]">
+      {/* Retro HUD Bar */}
+      <div className="w-full max-w-4xl bg-black border-b-4 border-stone-700 p-2 px-4 mb-4 flex justify-between items-center text-xl md:text-2xl shadow-lg sticky top-0 z-10">
+         <div className="flex items-center space-x-4">
+           <span className="text-white">{t.score}</span>
+           <span className="text-white tracking-widest">{score.toString().padStart(6, '0')}</span>
          </div>
-         <div className="flex flex-col items-center">
-           <span className="text-green-500 text-xs">{t.level}</span>
-           <span className="text-2xl font-bold">{level}</span>
+         
+         <div className="hidden md:block text-stone-500">
+           {t.level} {level}
          </div>
-         <div className="flex flex-col items-end">
-           <span className="text-green-500 text-xs">{t.lives}</span>
-           <div className="flex text-red-500 text-xl">
-             {Array.from({ length: Math.max(0, lives) }).map((_, i) => <span key={i}>❤️</span>)}
+
+         <div className="flex items-center space-x-4">
+           <span className="text-white">{t.lives}</span>
+           <div className="flex space-x-1">
+             {Array.from({ length: Math.max(0, lives) }).map((_, i) => (
+               <span key={i} className="text-red-600 drop-shadow-sm">❤</span>
+             ))}
            </div>
          </div>
       </div>
@@ -147,38 +143,42 @@ const Game: React.FC<Props> = ({ settings, onGameOver }) => {
       <div 
         id="game-canvas-container" 
         ref={canvasContainerRef}
-        className="flex justify-center items-center"
+        className="flex justify-center items-center shadow-[0_0_40px_rgba(0,0,0,0.6)] border-4 border-stone-800 rounded-lg overflow-hidden bg-black"
       >
-        {/* Canvas is injected here by GameEngine */}
+        {/* Canvas is injected here */}
+      </div>
+
+      <div className="mt-4 text-stone-600 text-sm">
+        {t.controls}
       </div>
 
       {/* Trivia Modal */}
       {gameState === GameState.TRIVIA && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-stone-900 border-4 border-yellow-600 rounded-lg max-w-lg w-full p-6 shadow-2xl animate-in fade-in zoom-in duration-200">
+          <div className="bg-stone-900 border-4 border-yellow-600 rounded-sm max-w-lg w-full p-6 shadow-[0_0_50px_rgba(234,179,8,0.2)] animate-in fade-in zoom-in duration-200 font-[VT323]">
              {loadingTrivia ? (
                <div className="text-center py-10">
-                 <div className="text-4xl mb-4">🧠</div>
-                 <p className="text-yellow-400 text-xl animate-pulse">{t.loadingQuestion}</p>
+                 <div className="text-4xl mb-4 animate-bounce">🦦</div>
+                 <p className="text-yellow-400 text-2xl animate-pulse">{t.loadingQuestion}</p>
                </div>
              ) : currentTrivia ? (
                <>
                 {triviaFeedback ? (
-                  <div className={`text-center py-12 text-4xl font-bold ${triviaFeedback === 'correct' ? 'text-green-400' : 'text-red-500'}`}>
+                  <div className={`text-center py-12 text-5xl font-bold ${triviaFeedback === 'correct' ? 'text-green-400' : 'text-red-500'}`}>
                     {triviaFeedback === 'correct' ? t.correct : t.wrong}
                   </div>
                 ) : (
                   <>
-                    <h3 className="text-yellow-500 text-lg mb-2 uppercase tracking-wider">{t.gateLocked}</h3>
-                    <p className="text-white text-xl md:text-2xl mb-6 font-bold leading-relaxed">{currentTrivia.question}</p>
-                    <div className="grid grid-cols-1 gap-3">
+                    <h3 className="text-yellow-600 text-xl mb-2 uppercase tracking-widest border-b border-stone-700 pb-2">{t.gateLocked}</h3>
+                    <p className="text-white text-2xl mb-8 leading-relaxed">{currentTrivia.question}</p>
+                    <div className="grid grid-cols-1 gap-4">
                       {currentTrivia.options.map((option, idx) => (
                         <button
                           key={idx}
                           onClick={() => handleTriviaAnswer(idx)}
-                          className="text-left bg-stone-800 hover:bg-yellow-700 text-yellow-100 p-4 rounded border-2 border-stone-600 hover:border-yellow-400 transition-all"
+                          className="text-left bg-stone-800 hover:bg-yellow-800 text-yellow-50 p-3 px-4 border-2 border-stone-600 hover:border-yellow-400 transition-all text-xl group"
                         >
-                          <span className="inline-block w-6 font-bold text-yellow-500">{String.fromCharCode(65 + idx)}.</span> {option}
+                          <span className="inline-block w-8 text-yellow-500 group-hover:text-white">{String.fromCharCode(65 + idx)}.</span> {option}
                         </button>
                       ))}
                     </div>
@@ -187,11 +187,11 @@ const Game: React.FC<Props> = ({ settings, onGameOver }) => {
                </>
              ) : (
                <div className="text-red-500 text-center">
-                 Error loading question. 
+                 Error. 
                  <button onClick={() => {
                    setGameState(GameState.PLAYING);
                    engineRef.current?.resume();
-                 }} className="underline ml-2">Skip</button>
+                 }} className="underline ml-2">SKIP</button>
                </div>
              )}
           </div>
