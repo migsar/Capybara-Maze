@@ -30,7 +30,7 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
   // Game UI State
   const [level, setLevel] = useState(1);
   const [score, setScore] = useState(0);
-  const [lives, setLives] = useState(3); // Start with 3 lives
+  const [lives, setLives] = useState(3);
   const [gameState, setGameState] = useState<GameState>(GameState.PLAYING);
   
   // Trivia State
@@ -38,17 +38,193 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
   const [triviaContext, setTriviaContext] = useState<TriviaContext | null>(null);
   const [loadingTrivia, setLoadingTrivia] = useState(false);
   const [triviaFeedback, setTriviaFeedback] = useState<'correct' | 'wrong' | null>(null);
+  const [selectedAnswerIndex, setSelectedAnswerIndex] = useState<number | null>(null);
 
   // Trivia Cache State
   const [questionCache, setQuestionCache] = useState<CachedQuestion[]>([]);
-  const [cacheParams, setCacheParams] = useState({ topic: '', lang: '' });
+  const fetchingPromiseRef = useRef<Promise<CachedQuestion[]> | null>(null);
+
+  // We use a ref to store the latest handler so the GameEngine (initialized once)
+  // can always call the latest version of the logic with fresh state.
+  const handleEngineEventRef = useRef<(event: string, data: any) => void>(() => {});
 
   const MAX_LIVES = 5;
 
-  useEffect(() => {
-    if (!canvasContainerRef.current) return;
+  // --- Trivia Logic ---
 
-    const handleEngineEvent = (event: string, data: any) => {
+  const loadNewBatch = async (topic: string, lang: Language): Promise<CachedQuestion[]> => {
+    // console.log("Fetching trivia batch from API...");
+    const questions = await fetchTriviaBatch(topic, lang);
+    return questions.map((q, i) => ({
+      ...q,
+      usageCount: 0,
+      localId: `${Date.now()}-${i}-${Math.random()}`
+    }));
+  };
+
+  const triggerFetch = (topic: string, lang: Language) => {
+    if (fetchingPromiseRef.current) return fetchingPromiseRef.current;
+    
+    const p = loadNewBatch(topic, lang).then(res => {
+        fetchingPromiseRef.current = null;
+        return res;
+    }).catch(err => {
+        console.error(err);
+        fetchingPromiseRef.current = null;
+        return [];
+    });
+    fetchingPromiseRef.current = p;
+    return p;
+  };
+
+  // Effect: Preload questions on mount or settings change
+  useEffect(() => {
+    // Reset cache if topic changed (simple check: if we have questions but they might be wrong topic, 
+    // we just clear. But since we don't store topic in cache item, we rely on the parent effect deps).
+    setQuestionCache([]); 
+    
+    triggerFetch(settings.selectedPrompt, settings.language).then(newBatch => {
+        if (newBatch.length > 0) {
+            setQuestionCache(newBatch);
+        }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.selectedPrompt, settings.language]);
+
+  const getNextQuestion = async (): Promise<TriviaQuestion> => {
+    // 1. Filter candidates from cache (Usage < 1 for fresh questions)
+    const candidates = questionCache.filter(q => q.usageCount < 1);
+
+    // 2. Background Refill Strategy
+    // If we have fewer than 5 fresh questions, trigger a background fetch
+    if (candidates.length < 5 && !fetchingPromiseRef.current) {
+        triggerFetch(settings.selectedPrompt, settings.language).then(newBatch => {
+             if (newBatch.length > 0) {
+                 setQuestionCache(prev => [...prev, ...newBatch]);
+             }
+        });
+    }
+
+    // 3. Fast Path: Return candidate immediately
+    if (candidates.length > 0) {
+        const selected = candidates[Math.floor(Math.random() * candidates.length)];
+        
+        // Mark as used in state
+        setQuestionCache(prev => prev.map(q => 
+            q.localId === selected.localId ? { ...q, usageCount: q.usageCount + 1 } : q
+        ));
+        
+        return selected;
+    }
+
+    // 4. Slow Path: Cache empty. Must wait for fetch.
+    let newBatch: CachedQuestion[] = [];
+    if (fetchingPromiseRef.current) {
+        newBatch = await fetchingPromiseRef.current;
+    } else {
+        newBatch = await triggerFetch(settings.selectedPrompt, settings.language);
+    }
+
+    if (newBatch.length > 0) {
+         setQuestionCache(prev => [...prev, ...newBatch]); // Append
+         
+         const selected = newBatch[0];
+         // Mark used
+         setQuestionCache(prev => prev.map(q => q.localId === selected.localId ? {...q, usageCount: 1} : q));
+         
+         return selected;
+    }
+
+    // Fallback if API fails
+    return {
+        question: "Which animal says 'Moo'? (Offline)",
+        options: ["Cat", "Cow", "Dog", "Fish"],
+        correctIndex: 1
+    };
+  };
+
+  const handleTriviaTrigger = async (type: TriviaContextType, data: any) => {
+    if (!settings.enableQuizzes) {
+      // Direct pass if quizzes disabled
+      if (type === 'GATE') engineRef.current?.unlockGate(data.pos);
+      if (type === 'TREAT') {
+        engineRef.current?.resolveTreat(data.pos);
+        setScore(s => s + 100);
+        setLives(prev => Math.min(prev + 1, MAX_LIVES));
+      }
+      if (type === 'PREDATOR') {
+        setLives(prev => prev - 1);
+        engineRef.current?.resolvePredator(data.predatorId, false);
+      }
+      return;
+    }
+
+    setGameState(GameState.TRIVIA);
+    setTriviaContext({ type, ...data });
+    setLoadingTrivia(true);
+    
+    const question = await getNextQuestion();
+    setCurrentTrivia(question);
+    setLoadingTrivia(false);
+  };
+
+  const handleTriviaAnswer = (index: number) => {
+    if (!currentTrivia || !triviaContext || !engineRef.current) return;
+
+    setSelectedAnswerIndex(index);
+    const isCorrect = index === currentTrivia.correctIndex;
+    
+    const FEEDBACK_DURATION = 3000;
+
+    if (isCorrect) {
+      setTriviaFeedback('correct');
+      setTimeout(() => {
+        if (triviaContext.type === 'GATE' && triviaContext.pos) {
+          engineRef.current?.unlockGate(triviaContext.pos);
+          setScore(prev => prev + 500);
+        }
+        else if (triviaContext.type === 'TREAT' && triviaContext.pos) {
+          engineRef.current?.resolveTreat(triviaContext.pos);
+          setScore(prev => prev + 100);
+          setLives(prev => Math.min(prev + 1, MAX_LIVES));
+        }
+        else if (triviaContext.type === 'PREDATOR' && triviaContext.predatorId !== undefined) {
+          engineRef.current?.resolvePredator(triviaContext.predatorId, true);
+        }
+        resetTriviaState();
+      }, FEEDBACK_DURATION);
+    } else {
+      setTriviaFeedback('wrong');
+      setTimeout(() => {
+        if (triviaContext.type === 'GATE') {
+           setLives(prev => prev - 1);
+           engineRef.current?.resume(); 
+        }
+        else if (triviaContext.type === 'TREAT' && triviaContext.pos) {
+           engineRef.current?.resolveTreat(triviaContext.pos);
+        }
+        else if (triviaContext.type === 'PREDATOR' && triviaContext.predatorId !== undefined) {
+           setLives(prev => prev - 1);
+           engineRef.current?.resolvePredator(triviaContext.predatorId, false);
+        }
+        resetTriviaState();
+      }, FEEDBACK_DURATION);
+    }
+  };
+
+  const resetTriviaState = () => {
+    setTriviaFeedback(null);
+    setCurrentTrivia(null);
+    setTriviaContext(null);
+    setSelectedAnswerIndex(null);
+    setGameState(GameState.PLAYING);
+  };
+
+  // --- Engine Integration ---
+
+  // Keep the Ref updated with the latest version of the handler
+  useEffect(() => {
+    handleEngineEventRef.current = (event: string, data: any) => {
       switch(event) {
         case 'GATE_HIT':
           handleTriviaTrigger('GATE', { pos: data });
@@ -65,8 +241,18 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
           break;
       }
     };
+  }); // Runs on every render to update the ref
 
-    const engine = new GameEngine(canvasContainerRef.current, handleEngineEvent);
+  // Initialize Engine ONCE
+  useEffect(() => {
+    if (!canvasContainerRef.current) return;
+
+    // Proxy calls to the ref
+    const proxyCallback = (event: string, data: any) => {
+      handleEngineEventRef.current(event, data);
+    };
+
+    const engine = new GameEngine(canvasContainerRef.current, proxyCallback);
     engine.init().then(() => {
       engine.loadLevel(level);
     });
@@ -77,7 +263,7 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
       engineRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // Empty deps ensure it runs once
 
   useEffect(() => {
     if (engineRef.current && level > 1) {
@@ -91,153 +277,6 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
       onGameOver(score);
     }
   }, [lives, onGameOver, score]);
-
-  // Helper to fetch and wrap questions
-  const loadNewBatch = async (topic: string, lang: Language): Promise<CachedQuestion[]> => {
-    const questions = await fetchTriviaBatch(topic, lang);
-    return questions.map((q, i) => ({
-      ...q,
-      usageCount: 0,
-      localId: `${Date.now()}-${i}`
-    }));
-  };
-
-  // Logic to get the next question from cache or fetch new ones
-  const getNextQuestion = async (): Promise<TriviaQuestion> => {
-    let activeCache = [...questionCache];
-    let activeTopic = cacheParams.topic;
-    let activeLang = cacheParams.lang;
-
-    // 1. Check if context (Topic/Lang) changed
-    const contextChanged = activeTopic !== settings.selectedPrompt || activeLang !== settings.language;
-    
-    // 2. Check if we have available questions (usage < 2)
-    const hasAvailable = activeCache.some(q => q.usageCount < 2);
-
-    if (contextChanged || !hasAvailable) {
-      const newBatch = await loadNewBatch(settings.selectedPrompt, settings.language);
-      
-      if (newBatch.length > 0) {
-        activeCache = newBatch;
-        activeTopic = settings.selectedPrompt;
-        activeLang = settings.language;
-        // Update state context immediately so subsequent calls know
-        setCacheParams({ topic: activeTopic, lang: activeLang as string }); 
-      } else {
-        // Fallback if API fails
-         return {
-          question: "Which animal says 'Moo'? (Offline)",
-          options: ["Cat", "Cow", "Dog", "Fish"],
-          correctIndex: 1
-        };
-      }
-    }
-
-    // 3. Select random question from available ones
-    const candidates = activeCache.filter(q => q.usageCount < 2);
-    if (candidates.length === 0) {
-      // Emergency fallback (should cover API failure case)
-       return {
-          question: "Which animal says 'Meow'? (Offline)",
-          options: ["Cat", "Cow", "Dog", "Fish"],
-          correctIndex: 0
-        };
-    }
-
-    const selected = candidates[Math.floor(Math.random() * candidates.length)];
-
-    // 4. Update usage count in state
-    const updatedCache = activeCache.map(q => 
-      q.localId === selected.localId 
-        ? { ...q, usageCount: q.usageCount + 1 } 
-        : q
-    );
-    
-    setQuestionCache(updatedCache);
-    return selected;
-  };
-
-  const handleTriviaTrigger = async (type: TriviaContextType, data: any) => {
-    // If quizzes are disabled, handle standard behavior immediately
-    if (!settings.enableQuizzes) {
-      if (type === 'GATE') engineRef.current?.unlockGate(data.pos);
-      if (type === 'TREAT') {
-        engineRef.current?.resolveTreat(data.pos);
-        setScore(s => s + 100);
-        setLives(prev => Math.min(prev + 1, MAX_LIVES));
-      }
-      if (type === 'PREDATOR') {
-        // Standard predator behavior: Lose life, reset
-        setLives(prev => prev - 1);
-        engineRef.current?.resolvePredator(data.predatorId, false);
-      }
-      return;
-    }
-
-    setGameState(GameState.TRIVIA);
-    setTriviaContext({ type, ...data });
-    setLoadingTrivia(true);
-    
-    // Use caching logic
-    const question = await getNextQuestion();
-    setCurrentTrivia(question);
-    setLoadingTrivia(false);
-  };
-
-  const handleTriviaAnswer = (index: number) => {
-    if (!currentTrivia || !triviaContext || !engineRef.current) return;
-
-    const isCorrect = index === currentTrivia.correctIndex;
-
-    if (isCorrect) {
-      setTriviaFeedback('correct');
-      // Success Logic
-      setTimeout(() => {
-        if (triviaContext.type === 'GATE' && triviaContext.pos) {
-          engineRef.current?.unlockGate(triviaContext.pos);
-          setScore(prev => prev + 500);
-        }
-        else if (triviaContext.type === 'TREAT' && triviaContext.pos) {
-          engineRef.current?.resolveTreat(triviaContext.pos);
-          setScore(prev => prev + 100);
-          setLives(prev => Math.min(prev + 1, MAX_LIVES));
-        }
-        else if (triviaContext.type === 'PREDATOR' && triviaContext.predatorId !== undefined) {
-          engineRef.current?.resolvePredator(triviaContext.predatorId, true);
-          // Jumped over, no life lost
-        }
-
-        resetTriviaState();
-      }, 1000);
-    } else {
-      setTriviaFeedback('wrong');
-      // Failure Logic
-      setTimeout(() => {
-        if (triviaContext.type === 'GATE') {
-           setLives(prev => prev - 1);
-           engineRef.current?.resume(); // Bounce/Stay logic handled by engine implicitly by not unlocking
-        }
-        else if (triviaContext.type === 'TREAT' && triviaContext.pos) {
-           // Wrong answer on treat: Treat disappears, NO heart gained
-           engineRef.current?.resolveTreat(triviaContext.pos);
-        }
-        else if (triviaContext.type === 'PREDATOR' && triviaContext.predatorId !== undefined) {
-           // Wrong answer on predator: Move to safe square (reset), Lose life
-           setLives(prev => prev - 1);
-           engineRef.current?.resolvePredator(triviaContext.predatorId, false);
-        }
-
-        resetTriviaState();
-      }, 1000);
-    }
-  };
-
-  const resetTriviaState = () => {
-    setTriviaFeedback(null);
-    setCurrentTrivia(null);
-    setTriviaContext(null);
-    setGameState(GameState.PLAYING);
-  };
 
   return (
     <div className="flex flex-col items-center justify-start min-h-screen bg-stone-950 text-white font-[VT323] overflow-hidden">
@@ -288,9 +327,9 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
       {/* Trivia Modal */}
       {gameState === GameState.TRIVIA && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-stone-900 border-4 border-yellow-600 rounded-lg max-w-2xl w-full p-8 shadow-[0_0_50px_rgba(234,179,8,0.3)] animate-in fade-in zoom-in duration-200 font-[VT323]">
-             {loadingTrivia ? (
-               <div className="text-center py-10 flex flex-col items-center">
+          <div className="bg-stone-900 border-4 border-yellow-600 rounded-lg max-w-4xl w-full min-h-[400px] p-8 shadow-[0_0_50px_rgba(234,179,8,0.3)] animate-in fade-in zoom-in duration-200 font-[VT323] relative overflow-hidden flex flex-col">
+             {loadingTrivia && (
+               <div className="flex-1 flex flex-col items-center justify-center">
                  <img 
                    src={ASSET_URLS.LOADING} 
                    alt="Loading..." 
@@ -300,39 +339,65 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
                    {t.loadingQuestion}
                  </p>
                </div>
-             ) : (
-               <>
-                 <h2 className="text-3xl md:text-4xl mb-6 text-center text-yellow-500 leading-tight">
-                   {currentTrivia?.question}
-                 </h2>
-                 <div className="grid grid-cols-1 gap-4">
-                   {currentTrivia?.options.map((option, idx) => {
-                     let btnClass = "py-4 px-6 text-2xl border-2 border-stone-600 bg-stone-800 hover:bg-stone-700 hover:border-yellow-500 transition-all text-left";
-                     
-                     if (triviaFeedback === 'correct' && idx === currentTrivia.correctIndex) {
-                       btnClass = "py-4 px-6 text-2xl border-2 border-green-500 bg-green-900 text-green-100 animate-pulse";
-                     } else if (triviaFeedback === 'wrong' && idx !== currentTrivia.correctIndex) {
-                       btnClass = "py-4 px-6 text-2xl border-2 border-red-500 bg-red-900 text-red-100";
-                     }
+             )}
 
-                     return (
+             {/* State 1: Input (Question & Options) */}
+             {!loadingTrivia && currentTrivia && !triviaFeedback && (
+               <>
+                 <h2 className="text-3xl md:text-5xl mb-8 text-center text-yellow-500 leading-tight">
+                   {currentTrivia.question}
+                 </h2>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1">
+                   {currentTrivia.options.map((option, idx) => (
                        <button
                          key={idx}
-                         onClick={() => !triviaFeedback && handleTriviaAnswer(idx)}
-                         disabled={!!triviaFeedback}
-                         className={btnClass}
+                         onClick={() => handleTriviaAnswer(idx)}
+                         className="py-4 px-6 text-2xl md:text-3xl border-2 border-stone-600 bg-stone-800 hover:bg-stone-700 hover:border-yellow-500 transition-all text-left rounded shadow-lg active:translate-y-1"
                        >
                          <span className="inline-block w-8 text-yellow-600 font-bold">{idx + 1}.</span> {option}
                        </button>
-                     );
-                   })}
+                   ))}
                  </div>
-                 {triviaFeedback && (
-                    <div className={`mt-6 text-center text-3xl font-bold ${triviaFeedback === 'correct' ? 'text-green-500' : 'text-red-500'}`}>
-                        {triviaFeedback === 'correct' ? t.correct : t.wrong}
-                    </div>
-                 )}
                </>
+             )}
+
+             {/* State 2: Correct Answer Feedback */}
+             {!loadingTrivia && currentTrivia && triviaFeedback === 'correct' && (
+                <div className="flex-1 flex flex-col items-center justify-center animate-in zoom-in duration-300">
+                    <h2 className="text-3xl text-yellow-600 mb-6 opacity-60 text-center">{currentTrivia.question}</h2>
+                    <div className="bg-green-600 border-8 border-green-400 rounded-2xl p-12 shadow-[0_0_60px_rgba(74,222,128,0.6)] transform scale-110 mb-8">
+                        <span className="text-6xl md:text-8xl font-bold text-white text-center block drop-shadow-md">
+                            {currentTrivia.options[currentTrivia.correctIndex]}
+                        </span>
+                    </div>
+                    <div className="text-5xl text-green-400 font-bold animate-bounce uppercase tracking-widest">
+                        {t.correct}
+                    </div>
+                </div>
+             )}
+
+             {/* State 3: Wrong Answer Feedback */}
+             {!loadingTrivia && currentTrivia && triviaFeedback === 'wrong' && selectedAnswerIndex !== null && (
+                <div className="flex-1 flex flex-col justify-center animate-in slide-in-from-right duration-300 relative">
+                   {/* Top Left: The Wrong Answer */}
+                   <div className="absolute top-0 left-0 transform -rotate-3 z-0 opacity-50 pointer-events-none">
+                      <div className="text-2xl text-red-500 font-bold mb-1 ml-2">{t.wrong}</div>
+                      <div className="bg-stone-800 border-2 border-red-800 p-4 rounded-lg">
+                         <span className="text-3xl text-red-700 line-through decoration-4 decoration-red-600 blur-[1px]">
+                           {currentTrivia.options[selectedAnswerIndex]}
+                         </span>
+                      </div>
+                   </div>
+
+                   {/* Center/Right: The Correct Answer */}
+                   <div className="flex flex-col items-center justify-center z-10 mt-12">
+                      <div className="bg-green-700 border-8 border-green-500 rounded-2xl p-10 shadow-[0_0_50px_rgba(34,197,94,0.4)] w-full text-center">
+                          <p className="text-5xl md:text-7xl font-bold text-white">
+                             {currentTrivia.options[currentTrivia.correctIndex]}
+                          </p>
+                      </div>
+                   </div>
+                </div>
              )}
           </div>
         </div>
