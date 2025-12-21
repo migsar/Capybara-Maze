@@ -1,4 +1,3 @@
-
 import { Application, Container, Graphics, Sprite, Texture, Assets } from 'pixi.js';
 import { BOARD_WIDTH, BOARD_HEIGHT, CELL_SIZE, PALETTE, ASSET_URLS } from '../constants';
 import { EntityType, Position, Direction, Predator, Treat, PredatorType, TreatType } from '../types';
@@ -19,9 +18,12 @@ export class GameEngine {
   private treats: Map<string, Sprite> = new Map();
   private walls: Container = new Container();
   private floor: Container = new Container();
+  private pondSprite: Sprite | null = null;
   
   // Textures
   private textures: Record<string, Texture> = {};
+  private wallTextures: Texture[] = [];
+  private pathTextures: Texture[] = [];
 
   // State
   private currentDirection: Direction | null = null;
@@ -69,6 +71,12 @@ export class GameEngine {
         { alias: 'pumpkin', src: ASSET_URLS.PUMPKIN },
         { alias: 'watermelon', src: ASSET_URLS.WATERMELON },
         { alias: 'corn', src: ASSET_URLS.CORN },
+        { alias: 'pond', src: ASSET_URLS.POND },
+        { alias: 'wall1', src: ASSET_URLS.WALL1 },
+        { alias: 'wall2', src: ASSET_URLS.WALL2 },
+        { alias: 'wall3', src: ASSET_URLS.WALL3 },
+        { alias: 'path1', src: ASSET_URLS.PATH1 },
+        { alias: 'path2', src: ASSET_URLS.PATH2 },
     ];
     
     await Assets.load(bundle);
@@ -82,9 +90,17 @@ export class GameEngine {
     this.textures[TreatType.PUMPKIN] = Assets.get('pumpkin');
     this.textures[TreatType.WATERMELON] = Assets.get('watermelon');
     this.textures[TreatType.CORN] = Assets.get('corn');
-
-    // Generate procedural background textures
-    this.generateProceduralTextures();
+    this.textures.POND = Assets.get('pond');
+    
+    this.wallTextures = [
+      Assets.get('wall1'),
+      Assets.get('wall2'),
+      Assets.get('wall3')
+    ];
+    this.pathTextures = [
+      Assets.get('path1'),
+      Assets.get('path2')
+    ];
 
     this.app.stage.addChild(this.gameContainer);
     this.gameContainer.addChild(this.floor);
@@ -93,38 +109,6 @@ export class GameEngine {
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
     this.app.ticker.add(this.update.bind(this));
-  }
-
-  private generateProceduralTextures() {
-    const g = new Graphics();
-    const S = CELL_SIZE; // scaling factor
-
-    // 1. DIRT FLOOR
-    g.clear();
-    g.rect(0, 0, S, S);
-    g.fill(PALETTE.DIRT_BG);
-    for(let i=0; i<8; i++) {
-        g.rect(Math.random()*S, Math.random()*S, S*0.1, S*0.1);
-        g.fill(PALETTE.DIRT_NOISE);
-    }
-    this.textures.DIRT = this.app.renderer.generateTexture(g);
-
-    // 2. BUSH WALL
-    g.clear();
-    g.rect(0, 0, S, S);
-    g.fill(PALETTE.BUSH_MAIN); 
-    g.circle(S*0.25, S*0.25, S*0.2); g.fill(PALETTE.BUSH_LIGHT);
-    g.circle(S*0.75, S*0.25, S*0.15); g.fill(PALETTE.BUSH_LIGHT);
-    g.circle(S*0.5, S*0.5, S*0.22); g.fill(PALETTE.BUSH_DARK);
-    this.textures.WALL = this.app.renderer.generateTexture(g);
-
-    // 3. WATER POND
-    g.clear();
-    g.rect(0, 0, S, S);
-    g.fill(PALETTE.WATER_MAIN);
-    g.rect(S*0.1, S*0.25, S*0.3, S*0.06); g.fill(PALETTE.WATER_LIGHT);
-    g.rect(S*0.6, S*0.6, S*0.25, S*0.06); g.fill(PALETTE.WATER_LIGHT);
-    this.textures.WATER = this.app.renderer.generateTexture(g);
   }
 
   public loadLevel(levelIndex: number) {
@@ -141,6 +125,10 @@ export class GameEngine {
       this.player.destroy();
       this.player = null;
     }
+    if (this.pondSprite) {
+      this.pondSprite.destroy();
+      this.pondSprite = null;
+    }
 
     // Reset State
     this.currentDirection = null;
@@ -154,6 +142,10 @@ export class GameEngine {
     this.grid = data.grid;
     this.playerPos = { ...data.playerStart };
 
+    // Find the pond boundaries (it's a 4x4 area)
+    let minPondX = Infinity, minPondY = Infinity;
+    let foundPond = false;
+
     // Draw Grid
     for (let y = 0; y < BOARD_HEIGHT; y++) {
       for (let x = 0; x < BOARD_WIDTH; x++) {
@@ -161,20 +153,36 @@ export class GameEngine {
         const px = x * CELL_SIZE;
         const py = y * CELL_SIZE;
 
-        const floorSprite = new Sprite(this.textures.DIRT);
+        // Path tiles for all floor areas
+        const pathTex = this.pathTextures[Math.floor(Math.random() * this.pathTextures.length)];
+        const floorSprite = new Sprite(pathTex);
         floorSprite.position.set(px, py);
+        floorSprite.width = CELL_SIZE;
+        floorSprite.height = CELL_SIZE;
         this.floor.addChild(floorSprite);
 
         if (type === EntityType.WALL) {
-           const wall = new Sprite(this.textures.WALL);
+           const wallTex = this.wallTextures[Math.floor(Math.random() * this.wallTextures.length)];
+           const wall = new Sprite(wallTex);
            wall.position.set(px, py);
+           wall.width = CELL_SIZE;
+           wall.height = CELL_SIZE;
            this.walls.addChild(wall);
         } else if (type === EntityType.POND) {
-           const water = new Sprite(this.textures.WATER);
-           water.position.set(px, py);
-           this.floor.addChild(water); 
+           minPondX = Math.min(minPondX, x);
+           minPondY = Math.min(minPondY, y);
+           foundPond = true;
         }
       }
+    }
+
+    // Place Large Pond Sprite
+    if (foundPond) {
+      this.pondSprite = new Sprite(this.textures.POND);
+      this.pondSprite.width = CELL_SIZE * 4;
+      this.pondSprite.height = CELL_SIZE * 4;
+      this.pondSprite.position.set(minPondX * CELL_SIZE, minPondY * CELL_SIZE);
+      this.floor.addChild(this.pondSprite);
     }
 
     // Gates
@@ -222,7 +230,6 @@ export class GameEngine {
   }
 
   private handleKeyDown = (e: KeyboardEvent) => {
-    // Prevent default scrolling for arrows
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
       e.preventDefault();
     }
@@ -248,10 +255,8 @@ export class GameEngine {
 
     if (dir) {
       this.heldKeys.delete(dir);
-      // If the released key was the scheduled direction, check if we have others held
       if (this.nextDirection === dir) {
          if (this.heldKeys.size > 0) {
-             // Fallback to the last added key (rough approximation, Set doesn't guarantee order but works for this)
              this.nextDirection = Array.from(this.heldKeys).pop() as Direction;
          } else {
              this.nextDirection = null;
@@ -266,7 +271,6 @@ export class GameEngine {
     this.time += 0.1;
     const S = CELL_SIZE;
     
-    // Bobbing Animation
     const bob = Math.sin(this.time) * (S * 0.05); 
     this.player.y = (this.isMoving && this.targetPos ? this.player.y : this.playerPos.y * S) + bob;
     
@@ -274,9 +278,7 @@ export class GameEngine {
         p.sprite.y = p.data.position.y * S + Math.cos(this.time + p.data.id) * (S * 0.05);
     });
 
-    // --- Player Movement Logic ---
     if (!this.isMoving) {
-      // Fluid Input: Check held keys if nextDirection is null
       if (!this.nextDirection && this.heldKeys.size > 0) {
           this.nextDirection = Array.from(this.heldKeys).pop() as Direction;
       }
@@ -284,15 +286,14 @@ export class GameEngine {
       if (this.nextDirection) {
         this.currentDirection = this.nextDirection;
         
-        // Flip sprite based on direction, preserving the scale (size)
         const scaleX = Math.abs(this.player.scale.x);
         if (this.currentDirection === 'LEFT') {
             this.player.scale.x = -scaleX;
-            this.player.anchor.set(1, 0); // Origin top-right (visual left)
+            this.player.anchor.set(1, 0);
         }
         if (this.currentDirection === 'RIGHT') {
             this.player.scale.x = scaleX;
-            this.player.anchor.set(0, 0); // Origin top-left
+            this.player.anchor.set(0, 0);
         }
 
         const nextPos = this.getNextPos(this.playerPos, this.currentDirection);
@@ -300,7 +301,6 @@ export class GameEngine {
         if (this.isValidMove(nextPos)) {
           if (this.grid[nextPos.y][nextPos.x] === EntityType.GATE) {
              this.isPaused = true;
-             // Stop movement intention on gate hit so we don't auto-walk after
              this.currentDirection = null; 
              this.heldKeys.clear(); 
              this.eventCallback('GATE_HIT', nextPos);
@@ -327,15 +327,12 @@ export class GameEngine {
       this.player.y = currentY + bob;
 
       if (this.moveTimer >= this.MOVE_INTERVAL) {
-        // MOVEMENT FINISHED
         this.isMoving = false;
         this.playerPos = { ...this.targetPos };
         this.targetPos = null;
         this.checkCollisions();
         
-        // Stop immediately if key was released during movement
         if (this.currentDirection && !this.heldKeys.has(this.currentDirection)) {
-            // Check if another key is held
              if (this.heldKeys.size > 0) {
                  this.nextDirection = Array.from(this.heldKeys).pop() as Direction;
              } else {
@@ -345,14 +342,12 @@ export class GameEngine {
       }
     }
 
-    // --- Predator Logic (Random Walk) ---
     this.predatorTimer++;
     if (this.predatorTimer > this.PREDATOR_INTERVAL) {
       this.movePredators();
       this.predatorTimer = 0;
     }
 
-    // --- Collisions ---
     const px = this.player.x + (S/2); 
     const py = this.player.y + (S/2);
     
@@ -363,24 +358,21 @@ export class GameEngine {
       
       if (dist < S * 0.7) {
         this.isPaused = true;
-        // Stop Movement
         this.isMoving = false;
         this.targetPos = null;
-        // Snap player to current grid pos to avoid visual glitch during pause
         if (this.player) {
           this.player.x = this.playerPos.x * S;
           this.player.y = this.playerPos.y * S;
         }
         
         this.eventCallback('HIT_PREDATOR', { id: pred.data.id, pos: pred.data.position });
-        return; // Break update loop
+        return;
       }
     }
   }
 
   private movePredators() {
     this.predators.forEach(p => {
-      // 1. Determine valid moves
       const { x, y } = p.data.position;
       const candidates: Position[] = [];
       const dirs = [{x:0,y:1}, {x:0,y:-1}, {x:1,y:0}, {x:-1,y:0}];
@@ -391,23 +383,18 @@ export class GameEngine {
           
           if(nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
               const cell = this.grid[ny][nx];
-              // Predators can walk on EMPTY or PLAYER, but not WALL, GATE, or POND
               if(cell !== EntityType.WALL && cell !== EntityType.GATE && cell !== EntityType.POND) {
                   candidates.push({x: nx, y: ny});
               }
           }
       }
       
-      // 2. Pick a random valid neighbor
       if (candidates.length > 0) {
           const next = candidates[Math.floor(Math.random() * candidates.length)];
           p.data.position = next;
-          
-          // 3. Teleport Sprite (Retro style, no lerp for enemies for now)
           p.sprite.x = next.x * CELL_SIZE;
           p.sprite.y = next.y * CELL_SIZE;
 
-          // 4. Face direction
           const scaleX = Math.abs(p.sprite.scale.x);
           if (next.x > x) {
               p.sprite.scale.x = scaleX; 
@@ -436,7 +423,6 @@ export class GameEngine {
   }
 
   public resolveTreat(pos: Position) {
-    // Treat disappears regardless of answer
     const key = `${pos.x},${pos.y}`;
     if (this.treats.has(key)) {
       this.treats.get(key)?.destroy();
@@ -448,37 +434,28 @@ export class GameEngine {
 
   public resolvePredator(predId: number, success: boolean) {
     if (success) {
-      // Jump Over / Move to other side
       const pred = this.predators.find(p => p.data.id === predId);
       if (pred) {
-        // Calculate "Other Side". 
-        // Simple heuristic: Try to move player 2 steps in current direction (jumping over)
-        // If undefined direction (stationary hit), move away from predator
-        
         let targetX = this.playerPos.x;
         let targetY = this.playerPos.y;
         
-        // If we were moving, jump 2 squares forward (1 is predator, 2 is behind it)
         if (this.currentDirection) {
-           const next = this.getNextPos(this.playerPos, this.currentDirection); // Predator pos
-           const jump = this.getNextPos(next, this.currentDirection); // Behind predator
+           const next = this.getNextPos(this.playerPos, this.currentDirection);
+           const jump = this.getNextPos(next, this.currentDirection);
            if (this.isValidJumpTarget(jump)) {
              targetX = jump.x;
              targetY = jump.y;
            } else {
-             // Blocked, try to find any empty neighbor that isn't the predator
              const neighbors = this.getValidNeighbors(this.playerPos);
              const safe = neighbors.find(n => n.x !== pred.data.position.x || n.y !== pred.data.position.y);
              if (safe) { targetX = safe.x; targetY = safe.y; }
            }
         } else {
-           // Predator hit us while idle. Move to any neighbor not occupied by predator
            const neighbors = this.getValidNeighbors(this.playerPos);
            const safe = neighbors.find(n => n.x !== pred.data.position.x || n.y !== pred.data.position.y);
            if (safe) { targetX = safe.x; targetY = safe.y; }
         }
 
-        // Apply Move
         this.playerPos = { x: targetX, y: targetY };
         if (this.player) {
           this.player.x = targetX * CELL_SIZE;
@@ -486,13 +463,8 @@ export class GameEngine {
         }
       }
     } else {
-      // Wrong Answer: Reset to Safe Square (Start)
       this.resetPlayerPosition();
     }
-    
-    // Ensure we aren't "inside" the predator anymore physically to prevent instant re-trigger
-    // The jump or reset handles this.
-    
     this.resume();
   }
 
@@ -542,7 +514,6 @@ export class GameEngine {
     this.playerPos = { x: 1, y: 1 };
     if (this.player) {
       this.player.position.set(this.playerPos.x * CELL_SIZE, this.playerPos.y * CELL_SIZE);
-      // Reset flip
       const scaleX = Math.abs(this.player.scale.x);
       this.player.scale.x = scaleX;
       this.player.anchor.set(0, 0);

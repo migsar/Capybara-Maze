@@ -15,6 +15,12 @@ export const ASSET_URLS = {
   CORN: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fcorn.png",
   LOADING: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fcapybara_loading.png",
   LOGO: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Flogo.png",
+  POND: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fpond.png",
+  WALL1: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fwall001.png",
+  WALL2: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fwall002.png",
+  WALL3: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fwall003.png",
+  PATH1: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fpath001.png",
+  PATH2: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fpath002.png",
 };
 
 // Visual Palette derived from the reference image
@@ -136,8 +142,8 @@ export const TRANSLATIONS = {
     // Settings Screen
     tabGeneral: "Geral",
     tabPrompts: "Temas Quiz",
-    enableQuizzes: "Ativar Perguntas",
-    currentPrompt: "Tema Atual",
+    enableQuizzes: "Ativar Preguntas",
+    currentPrompt: "Tema Actual",
     saveToFav: "Guardar nos Favoritos",
     loadJson: "Carregar JSON",
     saveJson: "Guardar JSON",
