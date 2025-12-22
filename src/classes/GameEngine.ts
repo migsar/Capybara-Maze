@@ -43,8 +43,10 @@ export class GameEngine {
   private isPaused: boolean = false;
   
   private time: number = 0; 
+  private canvasContainer: HTMLElement;
 
   constructor(element: HTMLElement, callback: GameEventCallback) {
+    this.canvasContainer = element;
     this.app = new Application();
     this.eventCallback = callback;
     this.gameContainer = new Container();
@@ -59,8 +61,7 @@ export class GameEngine {
       autoDensity: true,
     });
     
-    // @ts-ignore
-    document.getElementById('game-canvas-container')?.appendChild(this.app.canvas);
+    this.canvasContainer.appendChild(this.app.canvas);
     
     // Assets are PRELOADED in App.tsx. We retrieve them from cache.
     // Note: Aliases in App.tsx are lowercase keys from ASSET_URLS
@@ -488,7 +489,41 @@ export class GameEngine {
   public destroy() {
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
-    this.app.destroy(true, { children: true, texture: true });
+
+    if (this.app?.ticker) {
+      this.app.ticker.stop();
+    }
+    
+    // debugger;
+    // Remove the canvas from the DOM
+    // if (this.app.canvas && this.canvasContainer?.contains(this.app.canvas)) {
+      // this.canvasContainer.removeChild(this.app.canvas);
+    // }
+
+    // Destroy the PixiJS application
+    if (this.app) {
+      try {
+        this.app.destroy(true, {
+          children: true,
+          texture: true,
+          baseTexture: true,
+        });
+      } catch (error) {
+        console.warn('Error during PixiJS app destruction:', error);
+      } finally {
+        // @ts-ignore - Force clear reference
+        this.app = null;
+      }
+    }
+
+    // Clear other references
+    this.player = null;
+    this.pondSprite = null;
+    this.gates.clear();
+    this.treats.clear();
+    this.predators = [];
+    this.walls.removeChildren();
+    this.floor.removeChildren();
   }
 
   private resetPlayerPosition() {

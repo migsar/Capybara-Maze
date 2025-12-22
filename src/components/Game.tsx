@@ -1,9 +1,18 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { GameState, GameSettings, Position, TriviaQuestion, TriviaContext, TriviaContextType, Language } from '../types';
 import { TRANSLATIONS, ASSET_URLS } from '../constants';
 import { fetchTriviaBatch } from '../services/geminiService';
 import { GameEngine } from '../classes/GameEngine';
+
+import {
+  GameState,
+  GameSettings,
+  Position,
+  TriviaQuestion,
+  TriviaContext,
+  TriviaContextType,
+  Language
+} from '../types';
 
 interface Props {
   settings: GameSettings;
@@ -246,24 +255,52 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
   }, [gameState]);
 
   useEffect(() => {
-    if (!canvasContainerRef.current) return;
+    let isMounted = true;
+    let engine: GameEngine | null = null;
 
-    const proxyCallback = (event: string, data: any) => {
-      handleEngineEventRef.current(event, data);
+    const initEngine = async () => {
+      if (!canvasContainerRef.current || !isMounted) return;
+
+      const proxyCallback = (event: string, data: any) => {
+        handleEngineEventRef.current(event, data);
+      };
+
+      engine = new GameEngine(canvasContainerRef.current, proxyCallback);
+      engineRef.current = engine;
+
+      try {
+        await engine.init();
+        if (isMounted && engineRef.current) {
+          engineRef.current.loadLevel(level);
+        }
+      } catch (error) {
+        console.error('Failed to initialize game engine:', error);
+
+        if (engine && isMounted) {
+          engine.destroy();
+          engineRef.current = null;
+        }
+      }
     };
 
-    const engine = new GameEngine(canvasContainerRef.current, proxyCallback);
-    engine.init().then(() => {
-      engine.loadLevel(level);
-    });
-    engineRef.current = engine;
+    initEngine();
 
     return () => {
-      engine.destroy();
-      engineRef.current = null;
+      isMounted = false;
+    
+      // Clean up the engine
+      if (engineRef.current) {
+        engineRef.current.destroy();
+        engineRef.current = null;
+      }
+    
+      // Also clean up the local variable if initialization was in progress
+      if (engine && engine !== engineRef.current) {
+        engine.destroy();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); 
+  }, []);
 
   useEffect(() => {
     if (engineRef.current && level > 1) {
