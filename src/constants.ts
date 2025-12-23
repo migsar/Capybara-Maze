@@ -5,6 +5,7 @@ export const BOARD_WIDTH = 20; // 20 * 64 = 1280px
 export const BOARD_HEIGHT = 12; // 12 * 64 = 768px
 
 export const ASSET_URLS = {
+  SPLASH_IMAGE: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fsplash.png",
   CAPYBARA: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fcapybara.png",
   JAGUAR: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fjaguar.png",
   ANACONDA: "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fanaconda.png",
@@ -58,6 +59,8 @@ export const PALETTE = {
 
 export const TRANSLATIONS = {
   [Language.EN_US]: {
+    preloading: "PREPARING ADVENTURE",
+    loader_alt: "Loading",
     start: "START GAME",
     config: "SETTINGS",
     topic: "Trivia Topic",
@@ -90,6 +93,8 @@ export const TRANSLATIONS = {
     off: "OFF",
   },
   [Language.ES_MX]: {
+    preloading: "PREPARANDO LA AVENTURA",
+    loader_alt: "Cargando",
     start: "JUGAR",
     config: "AJUSTES",
     topic: "Tema",
@@ -111,7 +116,7 @@ export const TRANSLATIONS = {
     // Settings Screen
     tabGeneral: "General",
     tabPrompts: "Temas Quiz",
-    enableQuizzes: "Habilitar Preguntas",
+    enableQuizzes: "Activar Preguntas",
     currentPrompt: "Tema Actual",
     saveToFav: "Guardar en Favoritos",
     loadJson: "Cargar JSON",
@@ -122,6 +127,8 @@ export const TRANSLATIONS = {
     off: "INACTIVO",
   },
   [Language.PT_PT]: {
+    preloading: "A PREPARAR A AVENTURA",
+    loader_alt: "A carregar",
     start: "JOGAR",
     config: "OPÇÕES",
     topic: "Tópico",

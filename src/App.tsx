@@ -16,6 +16,8 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<GameSettings>(loadSettings);
   const [finalScore, setFinalScore] = useState(0);
 
+  const t = TRANSLATIONS[settings.language];
+
   // Persistence effect
   useEffect(() => {
     saveSettings(settings);
@@ -26,13 +28,11 @@ const App: React.FC = () => {
     const preloadAssets = async () => {
       // 1. Prepare assets for PixiJS and for Browser cache
       const assetEntries = Object.entries(ASSET_URLS);
-      const splashUrl = "https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fsplash.png";
       
       const assets = assetEntries.map(([key, url]) => ({
         alias: key.toLowerCase(),
         src: url
       }));
-      assets.push({ alias: 'splash', src: splashUrl });
 
       try {
         // 2. Load with PixiJS (this fetches the resources via XHR/Fetch)
@@ -84,7 +84,7 @@ const App: React.FC = () => {
           {/* We use a raw img here too, but it's the loading capy which is usually fast/hosted */}
           <img 
             src={ASSET_URLS.LOADING} 
-            alt="Loading..." 
+            alt={`${t.loader_alt}...`} 
             className="w-48 h-48 object-contain animate-bounce mb-8"
           />
           <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-64 h-4 bg-stone-800 border-2 border-stone-600 rounded-full overflow-hidden">
@@ -95,7 +95,7 @@ const App: React.FC = () => {
           </div>
         </div>
         <p className="text-3xl text-green-500 mt-8 tracking-widest animate-pulse">
-          PREPARING ADVENTURE... {loadProgress}%
+          {t.preloading}... {loadProgress}%
         </p>
       </div>
     );
@@ -106,7 +106,7 @@ const App: React.FC = () => {
   const PreloadStash = () => (
     <div className="hidden pointer-events-none opacity-0" aria-hidden="true">
        {Object.values(ASSET_URLS).map(url => <img key={url} src={url} alt="" />)}
-       <img src="https://20230229-us.us-southeast-1.linodeobjects.com/capybara%2Fsplash.png" alt="" />
+       <img src={ASSET_URLS.SPLASH_IMAGE} alt="" />
     </div>
   );
 
@@ -124,7 +124,6 @@ const App: React.FC = () => {
   }
 
   if (appState === GameState.GAME_OVER) {
-    const t = TRANSLATIONS[settings.language];
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-4 font-['VT323']">
         <div className="text-center space-y-6 animate-in fade-in duration-500">
