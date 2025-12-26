@@ -42,7 +42,7 @@ export interface Position {
   y: number;
 }
 
-export interface TriviaQuestion {
+export interface QuizQuestion {
   question: string;
   options: string[];
   correctIndex: number;
@@ -73,10 +73,10 @@ export interface GameSettings {
   favoritePrompts: string[];
 }
 
-export type TriviaContextType = 'GATE' | 'TREAT' | 'PREDATOR';
+export type QuizContextType = 'GATE' | 'TREAT' | 'PREDATOR';
 
-export interface TriviaContext {
-  type: TriviaContextType;
+export interface QuizContext {
+  type: QuizContextType;
   pos?: Position; // For Gates and Treats
   predatorId?: number; // For Predators
 }

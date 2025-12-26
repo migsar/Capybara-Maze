@@ -1,28 +1,21 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { TRANSLATIONS, ASSET_URLS } from '../constants';
-import { fetchTriviaBatch } from '../services/geminiService';
+import { quizService } from '../services/quizService';
 import { GameEngine } from '../classes/GameEngine';
 
 import {
   GameState,
   GameSettings,
-  Position,
-  TriviaQuestion,
-  TriviaContext,
-  TriviaContextType,
-  Language
+  QuizQuestion,
+  QuizContext,
+  QuizContextType,
 } from '../types';
 
 interface Props {
   settings: GameSettings;
   onGameOver: (score: number) => void;
   onExit: () => void;
-}
-
-interface CachedQuestion extends TriviaQuestion {
-  localId: string;
-  usageCount: number;
 }
 
 const HomeIcon = () => (
@@ -43,19 +36,15 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
   const [lives, setLives] = useState(3);
   const [gameState, setGameState] = useState<GameState>(GameState.PLAYING);
   
-  // Trivia State
-  const [currentTrivia, setCurrentTrivia] = useState<TriviaQuestion | null>(null);
-  const [triviaContext, setTriviaContext] = useState<TriviaContext | null>(null);
-  const [loadingTrivia, setLoadingTrivia] = useState(false);
-  const [triviaFeedback, setTriviaFeedback] = useState<'correct' | 'wrong' | null>(null);
+  // Quiz State
+  const [currentQuiz, setCurrentQuiz] = useState<QuizQuestion | null>(null);
+  const [quizContext, setQuizContext] = useState<QuizContext | null>(null);
+  const [loadingQuiz, setLoadingQuiz] = useState(false);
+  const [quizFeedback, setQuizFeedback] = useState<'correct' | 'wrong' | null>(null);
   const [selectedAnswerIndex, setSelectedAnswerIndex] = useState<number | null>(null);
 
   // Level Complete State
   const [countdown, setCountdown] = useState(5);
-
-  // Trivia Cache State
-  const [questionCache, setQuestionCache] = useState<CachedQuestion[]>([]);
-  const fetchingPromiseRef = useRef<Promise<CachedQuestion[]> | null>(null);
 
   // We use a ref to store the latest handler so the GameEngine (initialized once)
   // can always call the latest version of the logic with fresh state.
@@ -63,83 +52,11 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
 
   const MAX_LIVES = 5;
 
-  // --- Trivia Logic ---
-
-  const loadNewBatch = async (topic: string, lang: Language): Promise<CachedQuestion[]> => {
-    const questions = await fetchTriviaBatch(topic, lang);
-    return questions.map((q, i) => ({
-      ...q,
-      usageCount: 0,
-      localId: `${Date.now()}-${i}-${Math.random()}`
-    }));
-  };
-
-  const triggerFetch = (topic: string, lang: Language) => {
-    if (fetchingPromiseRef.current) return fetchingPromiseRef.current;
-    
-    const p = loadNewBatch(topic, lang).then(res => {
-        fetchingPromiseRef.current = null;
-        return res;
-    }).catch(err => {
-        console.error(err);
-        fetchingPromiseRef.current = null;
-        return [];
-    });
-    fetchingPromiseRef.current = p;
-    return p;
-  };
-
   useEffect(() => {
-    setQuestionCache([]); 
-    triggerFetch(settings.selectedPrompt, settings.language).then(newBatch => {
-        if (newBatch.length > 0) {
-            setQuestionCache(newBatch);
-        }
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    quizService.initialize(settings.selectedPrompt, settings.language);
   }, [settings.selectedPrompt, settings.language]);
 
-  const getNextQuestion = async (): Promise<TriviaQuestion> => {
-    const candidates = questionCache.filter(q => q.usageCount < 1);
-
-    if (candidates.length < 5 && !fetchingPromiseRef.current) {
-        triggerFetch(settings.selectedPrompt, settings.language).then(newBatch => {
-             if (newBatch.length > 0) {
-                 setQuestionCache(prev => [...prev, ...newBatch]);
-             }
-        });
-    }
-
-    if (candidates.length > 0) {
-        const selected = candidates[Math.floor(Math.random() * candidates.length)];
-        setQuestionCache(prev => prev.map(q => 
-            q.localId === selected.localId ? { ...q, usageCount: q.usageCount + 1 } : q
-        ));
-        return selected;
-    }
-
-    let newBatch: CachedQuestion[] = [];
-    if (fetchingPromiseRef.current) {
-        newBatch = await fetchingPromiseRef.current;
-    } else {
-        newBatch = await triggerFetch(settings.selectedPrompt, settings.language);
-    }
-
-    if (newBatch.length > 0) {
-         setQuestionCache(prev => [...prev, ...newBatch]);
-         const selected = newBatch[0];
-         setQuestionCache(prev => prev.map(q => q.localId === selected.localId ? {...q, usageCount: 1} : q));
-         return selected;
-    }
-
-    return {
-        question: "Which animal says 'Moo'? (Offline)",
-        options: ["Cat", "Cow", "Dog", "Fish"],
-        correctIndex: 1
-    };
-  };
-
-  const handleTriviaTrigger = async (type: TriviaContextType, data: any) => {
+  const handleQuizTrigger = async (type: QuizContextType, data: any) => {
     if (!settings.enableQuizzes) {
       if (type === 'GATE') engineRef.current?.unlockGate(data.pos);
       if (type === 'TREAT') {
@@ -154,63 +71,63 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
       return;
     }
 
-    setGameState(GameState.TRIVIA);
-    setTriviaContext({ type, ...data });
-    setLoadingTrivia(true);
+    setGameState(GameState.quiz);
+    setQuizContext({ type, ...data });
+    setLoadingQuiz(true);
     
-    const question = await getNextQuestion();
-    setCurrentTrivia(question);
-    setLoadingTrivia(false);
+    const question = await quizService.getNextQuestion();
+    setCurrentQuiz(question);
+    setLoadingQuiz(false);
   };
 
-  const handleTriviaAnswer = (index: number) => {
-    if (!currentTrivia || !triviaContext || !engineRef.current) return;
+  const handleQuizAnswer = (index: number) => {
+    if (!currentQuiz || !quizContext || !engineRef.current) return;
 
     setSelectedAnswerIndex(index);
-    const isCorrect = index === currentTrivia.correctIndex;
+    const isCorrect = index === currentQuiz.correctIndex;
     
     const FEEDBACK_DURATION = 3000;
 
     if (isCorrect) {
-      setTriviaFeedback('correct');
+      setQuizFeedback('correct');
       setTimeout(() => {
-        if (triviaContext.type === 'GATE' && triviaContext.pos) {
-          engineRef.current?.unlockGate(triviaContext.pos);
+        if (quizContext.type === 'GATE' && quizContext.pos) {
+          engineRef.current?.unlockGate(quizContext.pos);
           setScore(prev => prev + 500);
         }
-        else if (triviaContext.type === 'TREAT' && triviaContext.pos) {
-          engineRef.current?.resolveTreat(triviaContext.pos);
+        else if (quizContext.type === 'TREAT' && quizContext.pos) {
+          engineRef.current?.resolveTreat(quizContext.pos);
           setScore(prev => prev + 100);
           setLives(prev => Math.min(prev + 1, MAX_LIVES));
         }
-        else if (triviaContext.type === 'PREDATOR' && triviaContext.predatorId !== undefined) {
-          engineRef.current?.resolvePredator(triviaContext.predatorId, true);
+        else if (quizContext.type === 'PREDATOR' && quizContext.predatorId !== undefined) {
+          engineRef.current?.resolvePredator(quizContext.predatorId, true);
         }
-        resetTriviaState();
+        resetQuizState();
       }, FEEDBACK_DURATION);
     } else {
-      setTriviaFeedback('wrong');
+      setQuizFeedback('wrong');
       setTimeout(() => {
-        if (triviaContext.type === 'GATE') {
+        if (quizContext.type === 'GATE') {
            setLives(prev => prev - 1);
            engineRef.current?.resume(); 
         }
-        else if (triviaContext.type === 'TREAT' && triviaContext.pos) {
-           engineRef.current?.resolveTreat(triviaContext.pos);
+        else if (quizContext.type === 'TREAT' && quizContext.pos) {
+           engineRef.current?.resolveTreat(quizContext.pos);
         }
-        else if (triviaContext.type === 'PREDATOR' && triviaContext.predatorId !== undefined) {
+        else if (quizContext.type === 'PREDATOR' && quizContext.predatorId !== undefined) {
            setLives(prev => prev - 1);
-           engineRef.current?.resolvePredator(triviaContext.predatorId, false);
+           engineRef.current?.resolvePredator(quizContext.predatorId, false);
         }
-        resetTriviaState();
+        resetQuizState();
       }, FEEDBACK_DURATION);
     }
   };
 
-  const resetTriviaState = () => {
-    setTriviaFeedback(null);
-    setCurrentTrivia(null);
-    setTriviaContext(null);
+  const resetQuizState = () => {
+    setQuizFeedback(null);
+    setCurrentQuiz(null);
+    setQuizContext(null);
     setSelectedAnswerIndex(null);
     setGameState(GameState.PLAYING);
   };
@@ -219,13 +136,13 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
     handleEngineEventRef.current = (event: string, data: any) => {
       switch(event) {
         case 'GATE_HIT':
-          handleTriviaTrigger('GATE', { pos: data });
+          handleQuizTrigger('GATE', { pos: data });
           break;
         case 'HIT_TREAT':
-          handleTriviaTrigger('TREAT', { pos: data });
+          handleQuizTrigger('TREAT', { pos: data });
           break;
         case 'HIT_PREDATOR':
-          handleTriviaTrigger('PREDATOR', { predatorId: data.id });
+          handleQuizTrigger('PREDATOR', { predatorId: data.id });
           break;
         case 'WIN_LEVEL':
           setScore(s => s + 1000);
@@ -385,11 +302,11 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
         </div>
       )}
 
-      {/* Trivia Modal */}
-      {gameState === GameState.TRIVIA && (
+      {/* Quiz Modal */}
+      {gameState === GameState.quiz && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="bg-stone-900 border-4 border-yellow-600 rounded-lg max-w-4xl w-full min-h-[400px] p-8 shadow-[0_0_50px_rgba(234,179,8,0.3)] animate-in fade-in zoom-in duration-200 font-[VT323] relative overflow-hidden flex flex-col">
-             {loadingTrivia && (
+             {loadingQuiz && (
                <div className="flex-1 flex flex-col items-center justify-center">
                  <img 
                    src={ASSET_URLS.LOADING} 
@@ -402,16 +319,16 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
                </div>
              )}
 
-             {!loadingTrivia && currentTrivia && !triviaFeedback && (
+             {!loadingQuiz && currentQuiz && !quizFeedback && (
                <>
                  <h2 className="text-3xl md:text-5xl mb-8 text-center text-yellow-500 leading-tight">
-                   {currentTrivia.question}
+                   {currentQuiz.question}
                  </h2>
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1">
-                   {currentTrivia.options.map((option, idx) => (
+                   {currentQuiz.options.map((option, idx) => (
                        <button
                          key={idx}
-                         onClick={() => handleTriviaAnswer(idx)}
+                         onClick={() => handleQuizAnswer(idx)}
                          className="py-4 px-6 text-2xl md:text-3xl border-2 border-stone-600 bg-stone-800 hover:bg-stone-700 hover:border-yellow-500 transition-all text-left rounded shadow-lg active:translate-y-1"
                        >
                          <span className="inline-block w-8 text-yellow-600 font-bold">{idx + 1}.</span> {option}
@@ -421,12 +338,12 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
                </>
              )}
 
-             {!loadingTrivia && currentTrivia && triviaFeedback === 'correct' && (
+             {!loadingQuiz && currentQuiz && quizFeedback === 'correct' && (
                 <div className="flex-1 flex flex-col items-center justify-center animate-in zoom-in duration-300">
-                    <h2 className="text-3xl text-yellow-600 mb-6 opacity-60 text-center">{currentTrivia.question}</h2>
+                    <h2 className="text-3xl text-yellow-600 mb-6 opacity-60 text-center">{currentQuiz.question}</h2>
                     <div className="bg-green-600 border-8 border-green-400 rounded-2xl p-12 shadow-[0_0_60px_rgba(74,222,128,0.6)] transform scale-110 mb-8">
                         <span className="text-6xl md:text-8xl font-bold text-white text-center block drop-shadow-md">
-                            {currentTrivia.options[currentTrivia.correctIndex]}
+                            {currentQuiz.options[currentQuiz.correctIndex]}
                         </span>
                     </div>
                     <div className="text-5xl text-green-400 font-bold animate-bounce uppercase tracking-widest">
@@ -435,13 +352,13 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
                 </div>
              )}
 
-             {!loadingTrivia && currentTrivia && triviaFeedback === 'wrong' && selectedAnswerIndex !== null && (
+             {!loadingQuiz && currentQuiz && quizFeedback === 'wrong' && selectedAnswerIndex !== null && (
                 <div className="flex-1 flex flex-col justify-center animate-in slide-in-from-right duration-300 relative">
                    <div className="absolute top-0 left-0 transform -rotate-3 z-0 opacity-50 pointer-events-none">
                       <div className="text-2xl text-red-500 font-bold mb-1 ml-2">{t.wrong}</div>
                       <div className="bg-stone-800 border-2 border-red-800 p-4 rounded-lg">
                          <span className="text-3xl text-red-700 line-through decoration-4 decoration-red-600 blur-[1px]">
-                           {currentTrivia.options[selectedAnswerIndex]}
+                           {currentQuiz.options[selectedAnswerIndex]}
                          </span>
                       </div>
                    </div>
@@ -449,7 +366,7 @@ const Game: React.FC<Props> = ({ settings, onGameOver, onExit }) => {
                    <div className="flex flex-col items-center justify-center z-10 mt-12">
                       <div className="bg-green-700 border-8 border-green-500 rounded-2xl p-10 shadow-[0_0_50px_rgba(34,197,94,0.4)] w-full text-center">
                           <p className="text-5xl md:text-7xl font-bold text-white">
-                             {currentTrivia.options[currentTrivia.correctIndex]}
+                             {currentQuiz.options[currentQuiz.correctIndex]}
                           </p>
                       </div>
                    </div>
