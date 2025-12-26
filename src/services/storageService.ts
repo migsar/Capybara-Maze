@@ -5,7 +5,7 @@ const STORAGE_KEY = 'capymaze_settings_v1';
 const DEFAULT_SETTINGS: GameSettings = {
   language: Language.EN_US,
   enableQuizzes: true,
-  selectedPrompt: "Capybaras",
+  selectedPrompt: "Basic Math for 6 year olds",
   favoritePrompts: [
     "Capybaras", 
     "Disney Movies", 
